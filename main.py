@@ -19,28 +19,34 @@ class MusicDataset(Dataset):
         self.target_sr = target_sr
         self.processor = processor
         self.model = model
+        self.concatenated_segments = concatenated_segments
+        self.tensors_folder = tensors_folder
         
-        def __len__(self):
-          return self.length # return how many musics there is
+    def __len__(self):
+        return self.length # return how many musics there is
         
-        def __getitem__(self, idx): # This class expects a X (data) and y (labels) to be returned.
-            #However, we don't have them before finding hidden states -> model(input_values)
-            music_index, segments_number = music_segment_info[idx]
-            for i in range(segments_number):
-                segment = concatenated_segments[music_index][i]
-                with torch.no_grad():  # Apply torch.no_grad() to disable gradient computation
-                    audio, _ = librosa.load(segment, sr=self.target_sr)  # Load the audio segment
-                    input_values = self.processor(audio, sampling_rate=self.target_sr, return_tensors="pt").input_values
-                    hidden_states = self.model(input_values).last_hidden_state
-                concatenated_hidden_states.append(hidden_states)  # Append hidden states of each segment
-            concatenated_hidden_states = torch.cat(concatenated_hidden_states, dim=1)
-            tensor_file = os.path.join(tensors_folder, f"tensor{idx}.pt")
-            torch.save(concatenated_hidden_states, tensor_file)
+    def __getitem__(self, idx): # This class expects a X (data) and y (labels) to be returned.
+        #However, we don't have them before finding hidden states -> model(input_values)
+        music_index, segments_number = self.music_segment_info[idx]
+        concatenated_hidden_states = []
+        for i in range(segments_number):
+            segment = self.concatenated_segments[music_index][i]
+            with torch.no_grad():  # Apply torch.no_grad() to disable gradient computation
+                audio, _ = librosa.load(segment, sr=self.target_sr)  # Load the audio segment
+                input_values = self.processor(audio, sampling_rate=self.target_sr, return_tensors="pt").input_values
+                hidden_states = self.model(input_values).last_hidden_state
+            concatenated_hidden_states.append(hidden_states)  # Append hidden states of each segment
+            
+        concatenated_hidden_states = torch.cat(concatenated_hidden_states, dim=1)
 
-            length = len(concatenated_hidden_states[0][0][:-1]) + 1
-            reshaped_tensor = concatenated_hidden_states.view(-1, length)
 
-            return reshaped_tensor # X, y
+        length = len(concatenated_hidden_states[0][0][:-1]) + 1
+        reshaped_tensor = concatenated_hidden_states.view(-1, length)
+        
+        
+        tensor_file = os.path.join(self.tensors_folder, f"tensor{idx}.pt")
+        torch.save(reshaped_tensor, tensor_file)
+        return reshaped_tensor # X, y
 
 
 
@@ -95,11 +101,11 @@ def process_audio(mp3_folder, tensors_folder):
         concatenated_segments.append(segments)
 
     start_time = time.time()  # Record the starting time
-
     for i in range(len(mp3_files)):
-
+        print(mp3_files[i])
         audio, sample_rate = librosa.load(mp3_files[i], sr=target_sr)
         segment_audio(audio, i)
+        
     end_time = time.time()  # Record the ending time of segmentation
     execution_time = end_time - start_time
     print("Total execution time of segmentation part: ", execution_time, " seconds")
